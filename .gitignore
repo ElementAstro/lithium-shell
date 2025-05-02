@@ -1,0 +1,56 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+
+build
+.vscode
+node_modules
+src/pyutils/__pycache__/astrometry.cpython-310.pyc
+src/pyutils/test.jpg
+test.cpp
+
+module_test
+
+libexample.json
+
+test
+
+*.log
+*.xml
+
+.xmake
+.cache
+
+cmake-build-debug/
+
+.venv/
