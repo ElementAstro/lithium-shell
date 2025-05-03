@@ -19,40 +19,41 @@
 
 namespace shell {
 
-// 前向声明
+// Forward declaration
 class Shell;
 
 /**
  * @enum PluginState
- * @brief 表示插件的当前状态
+ * @brief Represents the current state of a plugin
  */
 enum class PluginState {
-  Created,     ///< 创建但未初始化
-  Loaded,      ///< 已加载但未初始化
-  Initialized, ///< 已初始化且运行中
-  Failed,      ///< 初始化或操作失败
-  Disabled,    ///< 已禁用
-  Unloaded     ///< 已卸载
+  Created,     ///< Created but not initialized
+  Loaded,      ///< Loaded but not initialized
+  Initialized, ///< Initialized and running
+  Failed,      ///< Failed to initialize or operate
+  Disabled,    ///< Disabled
+  Unloaded     ///< Unloaded
 };
 
 /**
  * @enum PluginEvent
- * @brief 插件可以响应的事件类型
+ * @brief Event types that plugins can respond to
  */
 enum class PluginEvent {
-  ShellStartup,       ///< Shell启动时
-  ShellShutdown,      ///< Shell关闭时
-  CommandBefore,      ///< 命令执行前
-  CommandAfter,       ///< 命令执行后
-  ConfigChanged,      ///< 配置改变时
-  EnvironmentChanged, ///< 环境变量改变时
-  PluginLoaded,       ///< 插件加载时
-  PluginUnloaded      ///< 插件卸载时
+  ShellStartup,       ///< When Shell starts
+  ShellShutdown,      ///< When Shell shuts down
+  CommandBefore,      ///< Before command execution
+  CommandAfter,       ///< After command execution
+  ConfigChanged,      ///< When configuration changes
+  EnvironmentChanged, ///< When environment variables change
+  PluginLoaded,       ///< When a plugin is loaded
+  PluginUnloaded      ///< When a plugin is unloaded
 };
 
 /**
  * @struct PluginEventData
- * @brief 事件数据容器，使用std::variant支持不同的事件数据类型
+ * @brief Event data container, using std::variant to support different event
+ * data types
  */
 struct PluginEventData {
   struct CommandData {
@@ -84,7 +85,7 @@ struct PluginEventData {
 
 /**
  * @class PluginMetadata
- * @brief 插件元数据
+ * @brief Plugin metadata
  */
 class PluginMetadata {
 public:
@@ -114,43 +115,43 @@ private:
 
 /**
  * @class Plugin
- * @brief 增强的插件接口，使用最新的C++特性
+ * @brief Enhanced plugin interface using the latest C++ features
  */
 class Plugin {
 public:
   virtual ~Plugin() = default;
 
-  // 基本生命周期方法
+  // Basic lifecycle methods
   virtual bool initialize(Environment &env) = 0;
   virtual void shutdown() = 0;
 
-  // 扩展的生命周期方法
+  // Extended lifecycle methods
   virtual bool on_load() { return true; }
   virtual bool on_unload() { return true; }
   virtual bool on_enable() { return true; }
   virtual bool on_disable() { return true; }
 
-  // 事件处理
+  // Event handling
   virtual bool handle_event([[maybe_unused]] PluginEvent event,
                             [[maybe_unused]] const PluginEventData &data) {
     return true;
   }
 
-  // 元数据访问
+  // Metadata access
   virtual PluginMetadata get_metadata() const = 0;
 
-  // 便捷访问方法
+  // Convenience access methods
   virtual std::string get_name() const { return get_metadata().name(); }
   virtual std::string get_version() const { return get_metadata().version(); }
   virtual std::string get_description() const {
     return get_metadata().description();
   }
 
-  // 状态管理
+  // State management
   PluginState get_state() const { return state_; }
   void set_state(PluginState state) { state_ = state; }
 
-  // 错误管理
+  // Error management
   void set_error(const std::string &error) { last_error_ = error; }
   std::string get_last_error() const { return last_error_; }
   bool has_error() const { return !last_error_.empty(); }
@@ -163,7 +164,7 @@ private:
 
 /**
  * @concept PluginConcept
- * @brief C++20 concept约束插件类型
+ * @brief C++20 concept constraining plugin types
  */
 template <typename T>
 concept PluginConcept =
@@ -175,26 +176,26 @@ concept PluginConcept =
 
 /**
  * @typedef PluginCreateFunc
- * @brief 插件创建函数类型
+ * @brief Plugin creation function type
  */
 using PluginCreateFunc = std::unique_ptr<Plugin> (*)();
 
 /**
  * @class PluginManager
- * @brief 增强的插件管理器
+ * @brief Enhanced plugin manager
  */
 class PluginManager {
 public:
   explicit PluginManager(Environment &env);
   ~PluginManager();
 
-  // 禁止复制和移动
+  // Prevent copy and move
   PluginManager(const PluginManager &) = delete;
   PluginManager &operator=(const PluginManager &) = delete;
   PluginManager(PluginManager &&) = delete;
   PluginManager &operator=(PluginManager &&) = delete;
 
-  // 插件加载和管理
+  // Plugin loading and management
   bool load_plugin(const std::filesystem::path &plugin_path);
   bool reload_plugin(const std::string &name);
   bool register_plugin(std::unique_ptr<Plugin> plugin);
@@ -203,15 +204,15 @@ public:
   bool unload_plugin(const std::string &name);
   void unload_all();
 
-  // 设置Shell实例的引用
+  // Set Shell instance reference
   void set_shell(Shell &shell) { shell_ = &shell; }
 
-  // 插件发现
+  // Plugin discovery
   void add_plugin_directory(const std::filesystem::path &directory);
   void scan_plugin_directories();
   std::vector<std::filesystem::path> discover_plugins() const;
 
-  // 插件查询
+  // Plugin queries
   std::vector<std::string> get_loaded_plugins() const;
   std::vector<std::string> get_enabled_plugins() const;
   std::vector<std::string> get_disabled_plugins() const;
@@ -220,10 +221,10 @@ public:
   PluginState get_plugin_state(const std::string &name) const;
   std::string get_plugin_error(const std::string &name) const;
 
-  // 插件事件系统
+  // Plugin event system
   void trigger_event(PluginEvent event, const PluginEventData &data = {});
 
-  // 热重载支持
+  // Hot reload support
   void check_for_plugin_updates();
   void set_auto_reload(bool enabled) { auto_reload_ = enabled; }
   bool get_auto_reload() const { return auto_reload_; }
@@ -237,7 +238,7 @@ private:
     bool enabled = true;
   };
 
-  // 内部实现方法
+  // Internal implementation methods
   bool load_plugin_from_library(const std::filesystem::path &path,
                                 PluginData &data);
   void update_plugin_timestamp(PluginData &data);
@@ -253,7 +254,7 @@ private:
 
 /**
  * @class BuiltinPlugin
- * @brief 内置插件的基类
+ * @brief Base class for built-in plugins
  */
 class BuiltinPlugin : public Plugin {
 public:
@@ -266,7 +267,7 @@ private:
   PluginMetadata metadata_;
 };
 
-// 便捷宏，用于插件定义导出函数
+// Convenience macro for plugin definition export function
 #ifdef _WIN32
 #define EXPORT_PLUGIN extern "C" __declspec(dllexport)
 #else
@@ -274,7 +275,7 @@ private:
 #endif
 
 /**
- * @brief 用于创建和注册一个标准插件的宏
+ * @brief Macro for creating and registering a standard plugin
  */
 #define DECLARE_PLUGIN(PluginClass)                                            \
   EXPORT_PLUGIN std::unique_ptr<shell::Plugin> create_plugin() {               \

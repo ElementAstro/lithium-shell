@@ -14,36 +14,45 @@
 
 namespace shell {
 
-// 前向声明
+// Forward declarations
 class ScriptDebugger;
 class ScriptValue;
 class ScriptFunction;
 
 /**
  * @enum ScriptErrorLevel
- * @brief 定义脚本错误的严重程度
+ * @brief Defines the severity levels of script errors
  */
 enum class ScriptErrorLevel {
-  Info,    // 信息性消息
-  Warning, // 警告，可能存在问题但不影响执行
-  Error,   // 错误，阻止当前语句/表达式执行
-  Fatal    // 严重错误，中止整个脚本/程序执行
+  Info,    ///< Informational message, no actual error
+  Warning, ///< Warning, potential issue but does not affect execution
+  Error,   ///< Error, prevents current statement/expression execution
+  Fatal    ///< Critical error, aborts the entire script/program execution
 };
 
 /**
  * @struct ScriptError
- * @brief 表示脚本执行过程中的错误
+ * @brief Represents an error that occurred during script execution
  */
 struct ScriptError {
-  ScriptErrorLevel level;   // 错误级别
-  std::string message;      // 错误消息
-  std::string source;       // 错误来源(文件名或"<repl>")
-  size_t line;              // 行号
-  size_t column;            // 列号
-  std::string code_snippet; // 代码片段
-  std::string suggestion;   // 修复建议
+  ScriptErrorLevel level;   ///< Error severity level
+  std::string message;      ///< Error description message
+  std::string source;       ///< Error source (filename or "<repl>")
+  size_t line;              ///< Line number where the error occurred
+  size_t column;            ///< Column number where the error occurred
+  std::string code_snippet; ///< Code snippet containing the error
+  std::string suggestion;   ///< Suggested fix for the error
 
-  // 构造函数，方便创建错误对象
+  /**
+   * @brief Constructor for creating error objects
+   * @param lvl Error severity level
+   * @param msg Error description message
+   * @param src Error source (defaults to "<repl>")
+   * @param ln Line number (defaults to 0)
+   * @param col Column number (defaults to 0)
+   * @param code Code snippet containing the error (defaults to empty)
+   * @param suggest Suggested fix (defaults to empty)
+   */
   ScriptError(ScriptErrorLevel lvl, std::string msg, std::string src = "<repl>",
               size_t ln = 0, size_t col = 0, std::string code = "",
               std::string suggest = "")
@@ -51,141 +60,217 @@ struct ScriptError {
         column(col), code_snippet(std::move(code)),
         suggestion(std::move(suggest)) {}
 
-  // 格式化为可读错误消息
+  /**
+   * @brief Formats the error into a human-readable message
+   * @return Formatted error message string
+   */
   std::string format_error() const;
 };
 
 /**
  * @class ScriptScope
- * @brief 表示脚本的作用域，管理变量和函数
+ * @brief Represents a script scope, managing variables and functions
+ *
+ * Handles variable and function scoping, allowing for nested scopes
+ * and proper name resolution according to scope hierarchy.
  */
 class ScriptScope {
 public:
+  /**
+   * @brief Constructor for creating a scope
+   * @param parent Parent scope (nullptr for global scope)
+   */
   ScriptScope(ScriptScope *parent = nullptr) : parent_(parent) {}
 
-  // 变量操作
+  /**
+   * @brief Sets or creates a variable in the current scope
+   * @param name Variable name
+   * @param value Variable value
+   */
   void set_variable(const std::string &name, ScriptValue value);
+
+  /**
+   * @brief Gets a variable value from current scope or parent scopes
+   * @param name Variable name to retrieve
+   * @return Optional containing the value if found, empty optional otherwise
+   */
   std::optional<ScriptValue> get_variable(const std::string &name) const;
+
+  /**
+   * @brief Checks if a variable exists in the current scope or parent scopes
+   * @param name Variable name to check
+   * @return True if the variable exists, false otherwise
+   */
   bool has_variable(const std::string &name) const;
 
-  // 函数操作
+  /**
+   * @brief Defines a function in the current scope
+   * @param name Function name
+   * @param func Function implementation
+   */
   void define_function(const std::string &name,
                        std::shared_ptr<ScriptFunction> func);
+
+  /**
+   * @brief Gets a function from current scope or parent scopes
+   * @param name Function name to retrieve
+   * @return Function implementation if found, nullptr otherwise
+   */
   std::shared_ptr<ScriptFunction> get_function(const std::string &name) const;
+
+  /**
+   * @brief Checks if a function exists in the current scope or parent scopes
+   * @param name Function name to check
+   * @return True if the function exists, false otherwise
+   */
   bool has_function(const std::string &name) const;
 
-  // 作用域查询
+  /**
+   * @brief Gets the parent scope
+   * @return Pointer to parent scope, or nullptr if this is the global scope
+   */
   ScriptScope *get_parent() const { return parent_; }
 
 private:
-  ScriptScope *parent_;
-  std::unordered_map<std::string, ScriptValue> variables_;
-  std::unordered_map<std::string, std::shared_ptr<ScriptFunction>> functions_;
+  ScriptScope *parent_; ///< Parent scope (nullptr for global scope)
+  std::unordered_map<std::string, ScriptValue>
+      variables_; ///< Variables in this scope
+  std::unordered_map<std::string, std::shared_ptr<ScriptFunction>>
+      functions_; ///< Functions in this scope
 };
 
 /**
  * @class ScriptInterpreter
- * @brief C++脚本解释器，提供解释执行C++脚本的能力
+ * @brief C++ script interpreter providing script execution capabilities
  *
- * 使用现代C++特性实现的脚本解释器，支持REPL环境、调试功能和异步执行。
+ * A modern C++ implementation of a script interpreter with support for REPL
+ * environment, debugging features, and asynchronous execution.
  */
 class ScriptInterpreter {
 public:
-  // 构造函数
+  /**
+   * @brief Constructor for the script interpreter
+   * @param env Reference to the environment
+   */
   ScriptInterpreter(Environment &env);
+
+  /**
+   * @brief Destructor for the script interpreter
+   */
   ~ScriptInterpreter();
 
-  // 禁止复制和移动
+  // Prevent copying and moving
   ScriptInterpreter(const ScriptInterpreter &) = delete;
   ScriptInterpreter &operator=(const ScriptInterpreter &) = delete;
   ScriptInterpreter(ScriptInterpreter &&) = delete;
   ScriptInterpreter &operator=(ScriptInterpreter &&) = delete;
 
   /**
-   * @brief 评估单行脚本代码
-   * @param code 要执行的代码
-   * @return 执行结果或错误
+   * @brief Evaluates a single line of script code
+   * @param code Code to execute
+   * @return Either the execution result or an error
    */
   std::variant<ScriptValue, ScriptError> eval(const std::string &code);
 
   /**
-   * @brief 评估多行脚本代码
-   * @param code 要执行的多行代码
-   * @return 执行结果或错误
+   * @brief Evaluates multiple lines of script code
+   * @param code Multi-line code to execute
+   * @return Either the execution result or an error
    */
   std::variant<ScriptValue, ScriptError> eval_multi(const std::string &code);
 
   /**
-   * @brief 从文件中加载并执行脚本
-   * @param path 脚本文件路径
-   * @return 执行结果或错误
+   * @brief Loads and executes a script from a file
+   * @param path Path to the script file
+   * @return Either the execution result or an error
    */
   std::variant<ScriptValue, ScriptError>
   load_and_eval(const std::filesystem::path &path);
 
   /**
-   * @brief 异步执行脚本代码
-   * @param code 要执行的代码
-   * @param callback 完成回调函数
+   * @brief Asynchronously executes script code
+   * @param code Code to execute
+   * @param callback Function to call upon completion
    */
   void eval_async(
       const std::string &code,
       std::function<void(std::variant<ScriptValue, ScriptError>)> callback);
 
   /**
-   * @brief 启动REPL环境
+   * @brief Starts the Read-Eval-Print Loop (REPL) environment
    */
   void start_repl();
 
   /**
-   * @brief 中断当前执行
+   * @brief Interrupts the current execution
    */
   void interrupt();
 
   /**
-   * @brief 获取调试器接口
+   * @brief Gets the debugger interface
+   * @return Reference to the script debugger
    */
   ScriptDebugger &get_debugger();
 
   /**
-   * @brief 获取当前环境
+   * @brief Gets the current environment
+   * @return Reference to the environment
    */
   Environment &get_environment() { return env_; }
 
+  /**
+   * @brief Handles a special REPL command
+   * @param command Command string to process
+   */
   void handle_repl_command(const std::string &command);
 
   /**
-   * @brief 注册内置函数
-   * @param name 函数名
-   * @param func 函数实现
+   * @brief Registers a native C++ function in the interpreter
+   * @param name Function name
+   * @param func Function implementation
    */
   void register_native_function(
       const std::string &name,
       std::function<ScriptValue(const std::vector<ScriptValue> &)> func);
 
+  /**
+   * @brief Provides auto-completion suggestions for partial inputs
+   * @param partial Partial input string to complete
+   * @return Vector of possible completions
+   */
   std::vector<std::string> complete(const std::string &partial);
 
 private:
-  // 初始化解释器
+  /**
+   * @brief Initializes the interpreter
+   */
   void initialize();
 
-  // 注册标准库函数
+  /**
+   * @brief Registers standard library functions
+   */
   void register_stdlib();
 
-  // 获取完成提示
-
-  // 读取一行输入，支持历史和补全
+  /**
+   * @brief Reads a line of input with history and completion support
+   * @param prompt The prompt to display
+   * @return Input string
+   */
   std::string read_line(const std::string &prompt);
 
-  // 格式化脚本值为字符串
+  /**
+   * @brief Formats a script value as a string
+   * @param value Value to format
+   * @return Formatted string representation
+   */
   std::string format_value(const ScriptValue &value);
 
 private:
-  Environment &env_;
-  std::unique_ptr<ScriptScope> global_scope_;
-  std::unique_ptr<ScriptDebugger> debugger_;
-  std::atomic<bool> running_;
-  std::vector<std::string> history_;
+  Environment &env_;                          ///< Reference to the environment
+  std::unique_ptr<ScriptScope> global_scope_; ///< Global script scope
+  std::unique_ptr<ScriptDebugger> debugger_;  ///< Script debugger
+  std::atomic<bool> running_; ///< Flag indicating if interpreter is running
+  std::vector<std::string> history_; ///< Command history
 };
 
 } // namespace shell
