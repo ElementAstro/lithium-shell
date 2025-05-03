@@ -181,7 +181,7 @@ int main(int argc, char *argv[]) {
   if (args.no_plugins) {
     std::cout << "已禁用插件系统\n";
     // 卸载所有插件
-    shell->get_plugin_manager().unload_all();
+    shell->unload_all_plugins();
   }
 
   int exit_status = 0;

@@ -2,12 +2,9 @@
 
 #include <atomic>
 #include <filesystem>
-#include <functional>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
-
 
 #include "../config/config_manager.hpp"
 #include "../interpreter/script_interpreter.hpp"
@@ -21,169 +18,474 @@ namespace shell {
 
 /**
  * @class Shell
- * @brief Shell主类，负责协调tokenizer、parser、executor和plugin_manager的操作
+ * @brief The main Shell class that coordinates tokenizer, parser, executor and
+ * plugin_manager operations
  */
 class Shell {
 public:
+  /**
+   * @brief Default constructor
+   */
   Shell();
+
+  /**
+   * @brief Destructor
+   */
   ~Shell();
 
-  // 禁止复制和移动
+  /**
+   * @brief Delete copy constructor to prevent copying
+   */
   Shell(const Shell &) = delete;
+
+  /**
+   * @brief Delete copy assignment operator to prevent copying
+   */
   Shell &operator=(const Shell &) = delete;
-  Shell(Shell &&) = delete;
-  Shell &operator=(Shell &&) = delete;
 
-  // Variable and alias management
-  void set_variable(const std::string &name, const std::string &value);
-  std::optional<std::string> get_variable(const std::string &name) const;
-  void add_alias(const std::string &alias, const std::string &command);
-  
-  // Configuration management
-  bool load_config(const std::filesystem::path &config_file);
+  /**
+   * @name Initialization and Execution
+   * @{
+   */
 
-  // Shell state
-  bool is_running() const;
-
-  // 初始化shell
-  // 初始化shell，返回是否成功初始化
+  /**
+   * @brief Initialize the shell
+   * @return true if initialization successful, false otherwise
+   */
   bool initialize();
 
-  // 处理中断信号
-  void handle_interrupt();
-
-  // Plugin management functions
-  bool load_plugin(const std::filesystem::path &plugin_path);
-  bool reload_plugin(const std::string &name);
-  bool enable_plugin(const std::string &name);
-  bool disable_plugin(const std::string &name);
-  bool register_builtin_plugin(std::unique_ptr<Plugin> plugin);
-  std::vector<std::string> get_loaded_plugins() const;
-  void add_plugin_directory(const std::filesystem::path &directory);
-  void scan_plugin_directories();
-  void set_plugin_hot_reload(bool enabled);
-  void check_for_plugin_updates();
-  std::optional<PluginMetadata> get_plugin_metadata(const std::string& name) const;
-  void trigger_event(PluginEvent event, const PluginEventData& data = {});
-
-  // 关闭shell
-  void shutdown();
-
-  // 运行交互式shell
+  /**
+   * @brief Run the shell main loop
+   */
   void run();
 
-  // 脚本解释器功能
-  void start_script_repl();
-  std::string evaluate_script_code(const std::string& code);
-  ScriptInterpreter& get_script_interpreter() { return *script_interpreter_; }
+  /**
+   * @brief Shutdown the shell
+   */
+  void shutdown();
 
-  // 评估命令字符串并返回输出
-  std::string evaluate(const std::string &command);
+  /**
+   * @brief Check if the shell is running
+   * @return true if the shell is running, false otherwise
+   */
+  [[nodiscard]] bool is_running() const noexcept;
 
-  // 评估脚本文件并返回输出
+  /** @} */
+
+  /**
+   * @name Command Execution
+   * @{
+   */
+
+  /**
+   * @brief Evaluate an input command string
+   * @param input Command string to evaluate
+   * @return Output of the command execution
+   */
+  std::string evaluate(const std::string &input);
+
+  /**
+   * @brief Evaluate a script file
+   * @param script_path Path to the script file
+   * @return Output of the script execution
+   */
   std::string evaluate_script(const std::filesystem::path &script_path);
 
-  // 获取环境
-  Environment &get_environment() {
-    if (!env_) {
-      throw std::runtime_error("Environment not initialized");
+  /**
+   * @brief Evaluate script code from a string
+   * @param code Script code to evaluate
+   * @return Output of the script execution
+   */
+  std::string evaluate_script_code(const std::string &code);
+
+  /**
+   * @brief Start a script REPL (Read-Eval-Print Loop)
+   */
+  void start_script_repl();
+
+  /** @} */
+
+  /**
+   * @name Variable Management
+   * @{
+   */
+
+  /**
+   * @brief Set a shell variable
+   * @param name Variable name
+   * @param value Variable value
+   */
+  void set_variable(const std::string &name, const std::string &value);
+
+  /**
+   * @brief Get a shell variable
+   * @param name Variable name
+   * @return Variable value if it exists, std::nullopt otherwise
+   */
+  [[nodiscard]] std::optional<std::string>
+  get_variable(const std::string &name) const;
+
+  /** @} */
+
+  /**
+   * @name Alias Management
+   * @{
+   */
+
+  /**
+   * @brief Add a command alias
+   * @param alias Alias name
+   * @param command Command that the alias refers to
+   */
+  void add_alias(const std::string &alias, const std::string &command);
+
+  /** @} */
+
+  /**
+   * @name Configuration Management
+   * @{
+   */
+
+  /**
+   * @brief Load configuration from a file
+   * @param config_file Path to the configuration file
+   * @return true if configuration loaded successfully, false otherwise
+   */
+  bool load_config(const std::filesystem::path &config_file);
+
+  /** @} */
+
+  /**
+   * @name Plugin Management
+   * @{
+   */
+
+  /**
+   * @brief Load a plugin from a file
+   * @param plugin_path Path to the plugin file
+   * @return true if plugin loaded successfully, false otherwise
+   */
+  bool load_plugin(const std::filesystem::path &plugin_path);
+
+  /**
+   * @brief Reload a plugin
+   * @param name Name of the plugin to reload
+   * @return true if plugin reloaded successfully, false otherwise
+   */
+  bool reload_plugin(const std::string &name);
+
+  /**
+   * @brief Enable a plugin
+   * @param name Name of the plugin to enable
+   * @return true if plugin enabled successfully, false otherwise
+   */
+  bool enable_plugin(const std::string &name);
+
+  /**
+   * @brief Disable a plugin
+   * @param name Name of the plugin to disable
+   * @return true if plugin disabled successfully, false otherwise
+   */
+  bool disable_plugin(const std::string &name);
+
+  /**
+   * @brief Register a built-in plugin
+   * @param plugin Unique pointer to the plugin
+   * @return true if plugin registered successfully, false otherwise
+   */
+  bool register_builtin_plugin(std::unique_ptr<Plugin> plugin);
+
+  /**
+   * @brief Get a list of loaded plugins
+   * @return Vector of plugin names
+   */
+  [[nodiscard]] std::vector<std::string> get_loaded_plugins() const;
+
+  /**
+   * @brief Add a directory to search for plugins
+   * @param directory Directory path to add
+   */
+  void add_plugin_directory(const std::filesystem::path &directory);
+
+  /**
+   * @brief Scan plugin directories for new plugins
+   */
+  void scan_plugin_directories();
+
+  /**
+   * @brief Enable or disable hot reloading of plugins
+   * @param enabled true to enable, false to disable
+   */
+  void set_plugin_hot_reload(bool enabled);
+
+  /**
+   * @brief Check for plugin updates
+   */
+  void check_for_plugin_updates();
+
+  /**
+   * @brief Unload all plugins from the shell
+   */
+  void unload_all_plugins() {
+    if (plugin_manager_) {
+      plugin_manager_->unload_all();
     }
-    return *env_;
   }
 
-  // 获取插件管理器
-  PluginManager &get_plugin_manager() {
-    if (!plugin_manager_) {
-      throw std::runtime_error("PluginManager not initialized");
-    }
+  /**
+   * @brief Get metadata for a plugin
+   * @param name Plugin name
+   * @return Plugin metadata if found, std::nullopt otherwise
+   */
+  [[nodiscard]] std::optional<PluginMetadata>
+  get_plugin_metadata(const std::string &name) const;
+
+  /**
+   * @brief Trigger a plugin event
+   * @param event Event to trigger
+   * @param data Event data
+   */
+  void trigger_event(PluginEvent event, const PluginEventData &data = {});
+
+  /** @} */
+
+  /**
+   * @name Environment Management
+   * @{
+   */
+
+  /**
+   * @brief Get the environment instance
+   * @return Reference to the environment
+   */
+  [[nodiscard]] Environment &get_environment() noexcept { return *env_; }
+
+  /**
+   * @brief Get the script interpreter instance
+   * @return Reference to the script interpreter
+   */
+  [[nodiscard]] ScriptInterpreter &get_script_interpreter() noexcept {
+    return *script_interpreter_;
+  }
+
+  /**
+   * @brief Get the plugin manager instance
+   * @return Reference to the plugin manager
+   */
+  [[nodiscard]] PluginManager &get_plugin_manager() noexcept {
     return *plugin_manager_;
   }
 
-  // 设置提示符格式化函数
-  void set_prompt_formatter(
-      std::function<std::string(const Environment &)> formatter);
-
-  // 执行内置命令
-  bool execute_builtin(const std::string &command,
-                       const std::vector<std::string> &args);
-  // Alias for add_builtin_command - same functionality, different name
-  void register_command(const std::string &name,
-                       std::function<int(Shell &, const std::vector<std::string> &)> handler,
-                       const std::string &help = "") {
-    add_builtin_command(name, handler, help);
+  /**
+   * @brief Get the environment instance (const version)
+   * @return Const reference to the environment
+   */
+  [[nodiscard]] const Environment &get_environment() const noexcept {
+    return *env_;
   }
 
-  // 添加内置命令
-  void add_builtin_command(
-      const std::string &name,
-      std::function<int(Shell &, const std::vector<std::string> &)> handler,
-      const std::string &help = "");
+  /** @} */
 
-  // 处理信号
-  void handle_signal(int sig);
+  /**
+   * @name Command Registration
+   * @{
+   */
 
-  // 获取当前实例
-  static Shell *get_current_instance();
+  /**
+   * @brief Register a command with the shell
+   * @tparam Func Function type
+   * @param name Command name
+   * @param func Command function
+   * @param help_text Help text for the command
+   */
+  template <typename Func>
+  void register_command(const std::string &name, Func &&func,
+                        const std::string &help_text) {
+    // Create a wrapper function that binds the command function with the
+    // current Shell instance
+    auto command_wrapper =
+        [func = std::forward<Func>(func)](std::span<const std::string> args,
+                                          Environment &env) -> std::string {
+      // Get Shell instance
+      Shell *shell_ptr = static_cast<Shell *>(env.get_shell());
+      if (!shell_ptr) {
+        return "Error: Shell instance not available";
+      }
+
+      try {
+        // Call the original function, passing Shell reference and arguments
+        int exit_code = func(
+            *shell_ptr, std::vector<std::string>(args.begin(), args.end()));
+        // Update exit status
+        env.set_last_exit_status(exit_code);
+        return ""; // Built-in commands output through other means, return empty
+                   // string here
+      } catch (const std::exception &e) {
+        return std::string("Error: ") + e.what();
+      }
+    };
+
+    // Register with the environment
+    env_->register_command(name, command_wrapper, help_text);
+  }
+
+  /** @} */
+
+  /**
+   * @name Signal Handling
+   * @{
+   */
+
+  /**
+   * @brief Handle interrupt signal
+   */
+  void handle_interrupt();
+
+  /** @} */
+
+  /**
+   * @name Static Instance Access
+   * @{
+   */
+
+  /**
+   * @brief Get the current shell instance
+   * @return Pointer to the current shell instance
+   */
+  [[nodiscard]] static Shell *get_current_instance();
+
+  /** @} */
 
 private:
-  // 初始化基本环境
-  void setup_environment();
+  /**
+   * @name Core Components
+   * @{
+   */
 
-  // 初始化内置命令
-  void register_builtin_commands();
+  /** @brief Tokenizer component */
+  std::shared_ptr<Tokenizer> tokenizer_;
 
-  // 获取格式化的提示符
-  std::string get_prompt();
+  /** @brief Parser component */
+  std::shared_ptr<Parser> parser_;
 
-  // Read a line of input with completion and history
-  std::string read_line();
+  /** @brief Executor component */
+  std::shared_ptr<Executor> executor_;
 
-  // Setup signal handlers
-  void setup_signal_handlers();
+  /** @brief Environment component */
+  std::shared_ptr<Environment> env_;
 
-  // Initialize completion
-  void initialize_completion();
+  /** @brief Configuration manager component */
+  std::shared_ptr<ConfigManager> config_;
 
-  // Print colorized prompt
-  void print_prompt();
+  /** @brief Plugin manager component */
+  std::shared_ptr<PluginManager> plugin_manager_;
 
-  // Register built-in commands
-  void register_builtins();
+  /** @brief Script interpreter component */
+  std::shared_ptr<ScriptInterpreter> script_interpreter_;
 
-  // 注册内置插件
-  void register_builtin_plugins();
+  /** @} */
 
-  // Components
-  std::unique_ptr<Tokenizer> tokenizer_;
-  std::unique_ptr<Parser> parser_;
-  std::unique_ptr<Executor> executor_;
-  std::unique_ptr<Environment> env_;
-  std::unique_ptr<ConfigManager> config_;
-  std::unique_ptr<PluginManager> plugin_manager_;
-  std::unique_ptr<ScriptInterpreter> script_interpreter_;
+  /**
+   * @name State Flags
+   * @{
+   */
 
-  // State
+  /** @brief Running state flag */
   std::atomic<bool> running_;
+
+  /** @} */
+
+  /**
+   * @name Shell Configuration
+   * @{
+   */
+
+  /** @brief Shell prompt format string */
   std::string prompt_;
+
+  /** @brief Current history index */
   size_t history_index_;
 
-  // 提示符格式化器
-  std::function<std::string(const Environment &)> prompt_formatter_;
+  /** @} */
 
-  // 内置命令处理器映射
-  std::unordered_map<
-      std::string,
-      std::function<int(Shell &, const std::vector<std::string> &)>>
-      builtin_commands_;
+  /**
+   * @name Readline Functions
+   * @{
+   */
 
-  // 内置命令帮助文本映射
-  std::unordered_map<std::string, std::string> builtin_help_;
+  /**
+   * @brief Print the shell prompt
+   */
+  void print_prompt();
 
-  // Tab completion
-  std::vector<std::string> complete(const std::string &partial);
+  /**
+   * @brief Read a line of input
+   * @return Input line
+   */
+  std::string read_line();
+
+  /**
+   * @brief Initialize command completion
+   */
+  void initialize_completion();
+
+  /**
+   * @brief Readline completion callback
+   * @param text Text to complete
+   * @param start Start position of text
+   * @param end End position of text
+   * @return Array of possible completions
+   */
   static char **completion_callback(const char *text, int start, int end);
+
+  /**
+   * @brief Command generator for completion
+   * @param text Text to complete
+   * @param state State of the completion
+   * @return Next possible completion
+   */
   static char *command_generator(const char *text, int state);
+
+  /** @} */
+
+  /**
+   * @name Signal Handling
+   * @{
+   */
+
+  /**
+   * @brief Set up signal handlers
+   */
+  void setup_signal_handlers();
+
+  /** @} */
+
+  /**
+   * @name Initialization Helpers
+   * @{
+   */
+
+  /**
+   * @brief Register built-in commands
+   */
+  void register_builtins();
+
+  /**
+   * @brief Register built-in plugins
+   */
+  void register_builtin_plugins();
+
+  /** @} */
+
+  /**
+   * @name Singleton Instance
+   * @{
+   */
+
+  /** @brief Pointer to the current shell instance */
   static Shell *current_instance_;
+
+  /** @} */
 };
 
 } // namespace shell

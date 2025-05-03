@@ -528,8 +528,9 @@ bool PluginManager::load_plugin_from_library(const std::filesystem::path &path,
   PluginCreateFunc create_func = nullptr;
 
 #ifdef _WIN32
-  create_func = reinterpret_cast<PluginCreateFunc>(
+  void *func_ptr = reinterpret_cast<void *>(
       GetProcAddress(static_cast<HMODULE>(handle), "create_plugin"));
+  create_func = reinterpret_cast<PluginCreateFunc>(func_ptr);
 #else
   create_func =
       reinterpret_cast<PluginCreateFunc>(dlsym(handle, "create_plugin"));

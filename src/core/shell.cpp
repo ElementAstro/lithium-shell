@@ -30,7 +30,6 @@
 #include "../interpreter/script_debugger.hpp"
 #include "../interpreter/script_interpreter.hpp"
 
-
 namespace shell {
 
 // Static member initialization
@@ -50,15 +49,17 @@ void signal_handler(int signal) {
 
 Shell::Shell()
     : tokenizer_(std::make_unique<Tokenizer>()),
-      parser_(std::make_unique<Parser>()), executor_(nullptr),
+      parser_(std::make_unique<Parser>()),
       env_(std::make_unique<Environment>()),
-      config_(std::make_unique<ConfigManager>()), plugin_manager_(nullptr),
-      running_(false), prompt_("\033[1;32m➜ \033[1;34m{pwd}\033[0m$ "),
-      history_index_(0) {
+      config_(std::make_unique<ConfigManager>()), running_(false),
+      prompt_("\033[1;32m➜ \033[1;34m{pwd}\033[0m$ "), history_index_(0) {
+
+  // 必须先创建环境，然后再创建依赖环境的组件
+  env_->set_shell(this); // 设置环境变量的shell引用
   executor_ = std::make_unique<Executor>(*env_);
   plugin_manager_ = std::make_unique<PluginManager>(*env_);
   script_interpreter_ = std::make_unique<ScriptInterpreter>(*env_);
-  plugin_manager_->set_shell(*this);
+
   current_instance_ = this;
   spdlog::info("Shell instance created.");
 }
@@ -415,7 +416,7 @@ void Shell::shutdown() {
   }
 }
 
-bool Shell::is_running() const { return running_; }
+bool Shell::is_running() const noexcept { return running_; }
 
 void Shell::handle_interrupt() {
   spdlog::debug("Handling interrupt signal (SIGINT).");
@@ -1803,22 +1804,23 @@ void Shell::start_script_repl() {
   try {
     // 启动调试器
     script_interpreter_->get_debugger().start();
-    
+
     // 设置调试器回调
     script_interpreter_->get_debugger().set_breakpoint_hit_callback(
-      [](const Breakpoint& bp) {
-        spdlog::debug("断点触发: #{} at {}:{}", bp.id, bp.location.source, bp.location.line);
-        std::cout << "\033[1;33m断点触发\033[0m: " << bp.location.source << ":" 
-                  << bp.location.line << " (命中次数: " << bp.hit_count << ")" << std::endl;
-      }
-    );
-    
+        [](const Breakpoint &bp) {
+          spdlog::debug("断点触发: #{} at {}:{}", bp.id, bp.location.source,
+                        bp.location.line);
+          std::cout << "\033[1;33m断点触发\033[0m: " << bp.location.source
+                    << ":" << bp.location.line << " (命中次数: " << bp.hit_count
+                    << ")" << std::endl;
+        });
+
     script_interpreter_->get_debugger().set_state_change_callback(
-      [](DebuggerState state) {
-        spdlog::debug("调试器状态改变: {}", static_cast<int>(state));
-        
-        // 根据状态变化输出不同提示
-        switch (state) {
+        [](DebuggerState state) {
+          spdlog::debug("调试器状态改变: {}", static_cast<int>(state));
+
+          // 根据状态变化输出不同提示
+          switch (state) {
           case DebuggerState::Running:
             std::cout << "\033[1;32m调试器运行中...\033[0m" << std::endl;
             break;
@@ -1830,16 +1832,15 @@ void Shell::start_script_repl() {
             break;
           default:
             break;
-        }
-      }
-    );
-    
+          }
+        });
+
     // 启动脚本解释器的REPL环境
     script_interpreter_->start_repl();
 
     // 停止调试器
     script_interpreter_->get_debugger().stop();
-    
+
     // REPL结束后恢复Shell状态
     running_ = original_running;
   } catch (const std::exception &e) {

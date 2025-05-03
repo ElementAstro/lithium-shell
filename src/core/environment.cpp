@@ -2,83 +2,88 @@
 
 #include <cstdlib>
 #include <regex>
+#include <spdlog/spdlog.h>
 #include <string>
+
 
 // setenv implementation for Windows environment
 #ifdef _WIN32
 // If this function is already declared in executor.cpp, it can be declared as
 // extern to avoid duplicate definition
-inline int setenv(const char *name, const char *value, int overwrite) {
-  if (!overwrite && getenv(name) != nullptr)
-    return 0;
-  return _putenv_s(name, value);
-}
+extern int setenv(const char *name, const char *value, int overwrite);
 #endif
 
 namespace shell {
 
 Environment::Environment() {
-  // Initialize working directory to current directory
+  // 初始化工作目录为当前目录
   working_directory_ = std::filesystem::current_path();
 
-  // Initialize shell variables
-  shell_variables_["?"] = "0"; // Last exit status
-  shell_variables_["SHELL"] = "modern_shell";
-  shell_variables_["errexit"] = "false";
+  // 初始化基本环境变量
+  set_variable("SHELL", "lithium-shell");
+  set_variable("errexit", "false");
+  set_variable("pipefail", "false");
+
+  // 记录上次命令的退出状态
+  set_variable("?", "0");
+
+  spdlog::debug("Environment initialized");
 }
 
 void Environment::set_variable(const std::string &name,
                                const std::string &value) {
   std::lock_guard<std::mutex> lock(mutex_);
-  shell_variables_[name] = value;
+  variables_[name] = value;
+
+  // 特殊变量处理：退出状态
+  if (name == "?") {
+    try {
+      last_exit_status_ = std::stoi(value);
+    } catch (const std::exception &) {
+      last_exit_status_ = 0;
+    }
+  }
 }
 
 std::optional<std::string>
 Environment::get_variable(const std::string &name) const {
   std::lock_guard<std::mutex> lock(mutex_);
-
-  auto it = shell_variables_.find(name);
-  if (it != shell_variables_.end()) {
+  auto it = variables_.find(name);
+  if (it != variables_.end()) {
     return it->second;
   }
-
   return std::nullopt;
 }
 
 const std::unordered_map<std::string, std::string> &
 Environment::get_all_variables() const {
-  return shell_variables_;
+  return variables_;
 }
 
 void Environment::set_env_variable(const std::string &name,
                                    const std::string &value) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  env_variables_[name] = value;
+  // 设置系统环境变量
+  setenv(name.c_str(), value.c_str(), 1);
 
-// Also set in the process environment
-#ifdef _WIN32
-  // Windows implementation
-  setenv(name.c_str(), value.c_str(), 1);
-#else
-  // POSIX implementation
-  setenv(name.c_str(), value.c_str(), 1);
-#endif
+  // 同时更新内部变量表
+  variables_[name] = value;
 }
 
 std::optional<std::string>
 Environment::get_env_variable(const std::string &name) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  auto it = env_variables_.find(name);
-  if (it != env_variables_.end()) {
-    return it->second;
-  }
-
-  // Try to get from process environment
-  const char *value = getenv(name.c_str());
+  // 首先尝试从系统获取
+  const char *value = std::getenv(name.c_str());
   if (value) {
     return std::string(value);
+  }
+
+  // 然后尝试从内部变量表获取
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = variables_.find(name);
+  if (it != variables_.end()) {
+    return it->second;
   }
 
   return std::nullopt;
@@ -86,16 +91,69 @@ Environment::get_env_variable(const std::string &name) const {
 
 std::unordered_map<std::string, std::string>
 Environment::get_all_env_variables() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return env_variables_;
+  std::unordered_map<std::string, std::string> result;
+
+  // 获取系统环境变量
+#ifdef _WIN32
+  // Windows实现
+  LPWCH envStrings = GetEnvironmentStringsW();
+  if (envStrings) {
+    LPWCH current = envStrings;
+    while (*current) {
+      std::wstring wstr(current);
+      size_t pos = wstr.find(L'=');
+      if (pos != std::wstring::npos) {
+        std::wstring wname = wstr.substr(0, pos);
+        std::wstring wvalue = wstr.substr(pos + 1);
+
+        // 转换为UTF-8
+        int nameLen = WideCharToMultiByte(CP_UTF8, 0, wname.c_str(), -1,
+                                          nullptr, 0, nullptr, nullptr);
+        int valueLen = WideCharToMultiByte(CP_UTF8, 0, wvalue.c_str(), -1,
+                                           nullptr, 0, nullptr, nullptr);
+
+        std::string name(nameLen, 0);
+        std::string value(valueLen, 0);
+
+        WideCharToMultiByte(CP_UTF8, 0, wname.c_str(), -1, &name[0], nameLen,
+                            nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, wvalue.c_str(), -1, &value[0], valueLen,
+                            nullptr, nullptr);
+
+        // 移除末尾的null终止符
+        name.pop_back();
+        value.pop_back();
+
+        result[name] = value;
+      }
+
+      // 移动到下一个环境字符串
+      current += wstr.length() + 1;
+    }
+    FreeEnvironmentStringsW(envStrings);
+  }
+#else
+  // POSIX实现
+  extern char **environ;
+  for (char **env = environ; *env; ++env) {
+    std::string envStr(*env);
+    size_t pos = envStr.find('=');
+    if (pos != std::string::npos) {
+      std::string name = envStr.substr(0, pos);
+      std::string value = envStr.substr(pos + 1);
+      result[name] = value;
+    }
+  }
+#endif
+
+  return result;
 }
 
 void Environment::register_command(const std::string &name, CommandFunc func,
                                    const std::string &help_text) {
   std::lock_guard<std::mutex> lock(mutex_);
-
-  commands_[name] = std::move(func);
-  command_help_[name] = help_text;
+  commands_[name] = {std::move(func), help_text};
+  spdlog::debug("Registered command: {}", name);
 }
 
 bool Environment::has_command(const std::string &name) const {
@@ -105,34 +163,30 @@ bool Environment::has_command(const std::string &name) const {
 
 CommandFunc Environment::get_command(const std::string &name) const {
   std::lock_guard<std::mutex> lock(mutex_);
-
   auto it = commands_.find(name);
   if (it != commands_.end()) {
-    return it->second;
+    return it->second.func;
   }
 
-  return nullptr;
+  throw std::runtime_error("Command not found: " + name);
 }
 
 std::string Environment::get_help_text(const std::string &name) const {
   std::lock_guard<std::mutex> lock(mutex_);
-
-  auto it = command_help_.find(name);
-  if (it != command_help_.end()) {
-    return it->second;
+  auto it = commands_.find(name);
+  if (it != commands_.end()) {
+    return it->second.help_text;
   }
-
   return "";
 }
 
 std::vector<std::string> Environment::get_all_commands() const {
   std::lock_guard<std::mutex> lock(mutex_);
-
   std::vector<std::string> result;
   result.reserve(commands_.size());
 
-  for (const auto &[name, _] : commands_) {
-    result.push_back(name);
+  for (const auto &pair : commands_) {
+    result.push_back(pair.first);
   }
 
   return result;
@@ -140,11 +194,10 @@ std::vector<std::string> Environment::get_all_commands() const {
 
 void Environment::set_working_directory(const std::filesystem::path &path) {
   std::lock_guard<std::mutex> lock(mutex_);
-
   working_directory_ = path;
 
-  // Also update PWD environment variable
-  set_env_variable("PWD", path.string());
+  // 同时更新环境变量PWD
+  set_env_variable("PWD", working_directory_.string());
 }
 
 std::filesystem::path Environment::get_working_directory() const {
@@ -154,28 +207,10 @@ std::filesystem::path Environment::get_working_directory() const {
 
 void Environment::add_to_history(const std::string &command) {
   std::lock_guard<std::mutex> lock(mutex_);
-
-  // Don't add empty commands
-  if (command.empty()) {
-    return;
-  }
-
-  // Don't add duplicate of the last command
-  if (!history_.empty() && history_.back() == command) {
-    return;
-  }
-
   history_.push_back(command);
-
-  // Limit history size
-  const size_t max_history = 1000;
-  if (history_.size() > max_history) {
-    history_.erase(history_.begin());
-  }
 }
 
 const std::vector<std::string> &Environment::get_history() const {
-  std::lock_guard<std::mutex> lock(mutex_);
   return history_;
 }
 
@@ -197,97 +232,37 @@ void Environment::add_alias(const std::string &alias,
   aliases_[alias] = command;
 }
 
-bool Environment::remove_alias(const std::string &alias) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return aliases_.erase(alias) > 0;
-}
-
 std::optional<std::string>
-Environment::resolve_alias(const std::string &alias) const {
+Environment::resolve_alias(const std::string &name) const {
   std::lock_guard<std::mutex> lock(mutex_);
-
-  auto it = aliases_.find(alias);
+  auto it = aliases_.find(name);
   if (it != aliases_.end()) {
     return it->second;
   }
-
   return std::nullopt;
 }
 
-std::unordered_map<std::string, std::string>
-Environment::get_all_aliases() const {
+bool Environment::remove_alias(const std::string &alias) {
   std::lock_guard<std::mutex> lock(mutex_);
+  auto it = aliases_.find(alias);
+  if (it != aliases_.end()) {
+    aliases_.erase(it);
+    return true;
+  }
+  return false;
+}
+
+const std::unordered_map<std::string, std::string> &
+Environment::get_all_aliases() const {
   return aliases_;
 }
 
-std::string Environment::expand_variables(const std::string &input) const {
-  std::string result = input;
+void Environment::set_last_exit_status(int status) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  last_exit_status_ = status;
 
-  // Regex for matching ${VAR} format
-  std::regex var_braces_regex("\\$\\{([^}]+)\\}");
-
-  // Regex for matching $VAR format (must be at word boundary)
-  std::regex var_regex("\\$([a-zA-Z_][a-zA-Z0-9_]*)");
-
-  // Helper function to replace variables
-  auto replace_var = [this](const std::string &var_name) -> std::string {
-    // First check shell variables
-    auto shell_var = this->get_variable(var_name);
-    if (shell_var) {
-      return *shell_var;
-    }
-
-    // Then check environment variables
-    auto env_var = this->get_env_variable(var_name);
-    if (env_var) {
-      return *env_var;
-    }
-
-    // If not found, expand to empty string
-    return std::string();
-  };
-
-  // Replace ${VAR} with variable value
-  {
-    std::string temp;
-    std::sregex_iterator it(result.begin(), result.end(), var_braces_regex);
-    std::sregex_iterator end;
-
-    size_t last_pos = 0;
-    for (; it != end; ++it) {
-      std::smatch match = *it;
-      // Add text before the match
-      temp.append(result, last_pos, match.position() - last_pos);
-      // Add replacement
-      temp.append(replace_var(match[1].str()));
-      last_pos = match.position() + match.length();
-    }
-    // Add the remaining text
-    temp.append(result, last_pos, result.size() - last_pos);
-    result = std::move(temp);
-  }
-
-  // Replace $VAR with variable value
-  {
-    std::string temp;
-    std::sregex_iterator it(result.begin(), result.end(), var_regex);
-    std::sregex_iterator end;
-
-    size_t last_pos = 0;
-    for (; it != end; ++it) {
-      std::smatch match = *it;
-      // Add text before the match
-      temp.append(result, last_pos, match.position() - last_pos);
-      // Add replacement
-      temp.append(replace_var(match[1].str()));
-      last_pos = match.position() + match.length();
-    }
-    // Add the remaining text
-    temp.append(result, last_pos, result.size() - last_pos);
-    result = std::move(temp);
-  }
-
-  return result;
+  // 同时更新shell变量?
+  set_variable("?", std::to_string(status));
 }
 
 int Environment::get_last_exit_status() const {
@@ -295,12 +270,98 @@ int Environment::get_last_exit_status() const {
   return last_exit_status_;
 }
 
-void Environment::set_last_exit_status(int status) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  last_exit_status_ = status;
+std::string Environment::expand_variables(const std::string &str) const {
+  std::string result = str;
 
-  // Also update the ? variable
-  shell_variables_["?"] = std::to_string(status);
+  // 处理$VAR形式的变量
+  std::regex var_regex("\\$(\\w+|\\?|\\$)");
+  auto var_begin = std::sregex_iterator(str.begin(), str.end(), var_regex);
+  auto var_end = std::sregex_iterator();
+
+  // 需要从后往前替换，避免位置偏移
+  std::vector<std::pair<size_t, size_t>> positions;
+  std::vector<std::string> replacements;
+
+  for (auto i = var_begin; i != var_end; ++i) {
+    std::smatch match = *i;
+    std::string var_name = match[1].str();
+
+    // 特殊变量
+    if (var_name == "$") {
+      // $$ 展开为进程ID
+      replacements.push_back(std::to_string(getpid()));
+    } else if (var_name == "?") {
+      // $? 展开为上一条命令的退出状态
+      replacements.push_back(std::to_string(get_last_exit_status()));
+    } else {
+      // 常规变量
+      auto value = get_variable(var_name);
+      replacements.push_back(value.value_or(""));
+    }
+
+    positions.emplace_back(match.position(), match.length());
+  }
+
+  // 从后往前替换，避免位置偏移
+  for (size_t i = positions.size(); i > 0; --i) {
+    auto [pos, len] = positions[i - 1];
+    result.replace(pos, len, replacements[i - 1]);
+  }
+
+  // 处理${VAR}形式的变量
+  std::regex brace_var_regex("\\$\\{(\\w+|\\?|\\$)\\}");
+  auto brace_var_begin =
+      std::sregex_iterator(result.begin(), result.end(), brace_var_regex);
+  auto brace_var_end = std::sregex_iterator();
+
+  positions.clear();
+  replacements.clear();
+
+  for (auto i = brace_var_begin; i != brace_var_end; ++i) {
+    std::smatch match = *i;
+    std::string var_name = match[1].str();
+
+    // 特殊变量
+    if (var_name == "$") {
+      replacements.push_back(std::to_string(getpid()));
+    } else if (var_name == "?") {
+      replacements.push_back(std::to_string(get_last_exit_status()));
+    } else {
+      auto value = get_variable(var_name);
+      replacements.push_back(value.value_or(""));
+    }
+
+    positions.emplace_back(match.position(), match.length());
+  }
+
+  // 从后往前替换
+  for (size_t i = positions.size(); i > 0; --i) {
+    auto [pos, len] = positions[i - 1];
+    result.replace(pos, len, replacements[i - 1]);
+  }
+
+  // 处理~展开为用户主目录
+  if (result == "~" || result.starts_with("~/") || result.starts_with("~\\")) {
+    auto home = get_env_variable("HOME");
+#ifdef _WIN32
+    if (!home) {
+      home = get_env_variable("USERPROFILE");
+    }
+#endif
+    if (home) {
+      if (result == "~") {
+        result = *home;
+      } else {
+        result.replace(0, 1, *home);
+      }
+    }
+  }
+
+  return result;
 }
+
+void Environment::set_shell(void *shell) { shell_instance_ = shell; }
+
+void *Environment::get_shell() const { return shell_instance_; }
 
 } // namespace shell
